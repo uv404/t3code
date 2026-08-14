@@ -169,6 +169,7 @@ import {
   type SnoozePreset,
 } from "./Sidebar.snooze";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { NativeSessionImportDialog } from "./NativeSessionImportDialog";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import {
@@ -3543,6 +3544,9 @@ export default function Sidebar() {
                     )}
                   </TooltipPopup>
                 </Tooltip>
+              </div>
+              <div className="shrink-0">
+                <NativeSessionImportDialog />
               </div>
             </div>
             {projectGroups.length > 0 ? (
