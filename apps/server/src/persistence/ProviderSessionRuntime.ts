@@ -11,6 +11,7 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import {
   IsoDateTime,
+  NativeSessionId,
   ProviderInstanceId,
   ProviderSessionRuntimeStatus,
   RuntimeMode,
@@ -49,11 +50,25 @@ export const ProviderSessionRuntime = Schema.Struct({
   lastSeenAt: IsoDateTime,
   resumeCursor: Schema.NullOr(Schema.Unknown),
   runtimePayload: Schema.NullOr(Schema.Unknown),
+  /**
+   * Set only for threads adopted from a session the harness created outside T3.
+   * Null for every ordinary T3-created session, and unique per
+   * `(providerName, nativeSessionId)` by database index — that index is what
+   * makes import idempotent under concurrency.
+   */
+  nativeSessionId: Schema.NullOr(NativeSessionId),
 });
 export type ProviderSessionRuntime = typeof ProviderSessionRuntime.Type;
 
 export const GetProviderSessionRuntimeInput = Schema.Struct({ threadId: ThreadId });
 export type GetProviderSessionRuntimeInput = typeof GetProviderSessionRuntimeInput.Type;
+
+export const GetProviderSessionRuntimeByNativeSessionInput = Schema.Struct({
+  providerName: Schema.String,
+  nativeSessionId: NativeSessionId,
+});
+export type GetProviderSessionRuntimeByNativeSessionInput =
+  typeof GetProviderSessionRuntimeByNativeSessionInput.Type;
 
 export const DeleteProviderSessionRuntimeInput = Schema.Struct({ threadId: ThreadId });
 export type DeleteProviderSessionRuntimeInput = typeof DeleteProviderSessionRuntimeInput.Type;
@@ -78,6 +93,19 @@ export class ProviderSessionRuntimeRepository extends Context.Service<
      */
     readonly getByThreadId: (
       input: GetProviderSessionRuntimeInput,
+    ) => Effect.Effect<
+      Option.Option<ProviderSessionRuntime>,
+      ProviderSessionRuntimeRepositoryError
+    >;
+
+    /**
+     * Read provider runtime state by the harness session it was imported from.
+     *
+     * Backed by the unique `(provider_name, native_session_id)` index, so a
+     * match is the one thread that owns that native session.
+     */
+    readonly getByNativeSession: (
+      input: GetProviderSessionRuntimeByNativeSessionInput,
     ) => Effect.Effect<
       Option.Option<ProviderSessionRuntime>,
       ProviderSessionRuntimeRepositoryError
@@ -119,6 +147,7 @@ const ProviderSessionRuntimeRawDbRowSchema = Schema.Struct({
   lastSeenAt: Schema.Unknown,
   resumeCursor: Schema.Unknown,
   runtimePayload: Schema.Unknown,
+  nativeSessionId: Schema.Unknown,
 });
 
 const decodeRuntimeRow = Schema.decodeUnknownEffect(ProviderSessionRuntimeDbRowSchema);
@@ -160,7 +189,8 @@ export const make = Effect.gen(function* () {
           status,
           last_seen_at,
           resume_cursor_json,
-          runtime_payload_json
+          runtime_payload_json,
+          native_session_id
         )
         VALUES (
           ${runtime.threadId},
@@ -171,7 +201,8 @@ export const make = Effect.gen(function* () {
           ${runtime.status},
           ${runtime.lastSeenAt},
           ${runtime.resumeCursor},
-          ${runtime.runtimePayload}
+          ${runtime.runtimePayload},
+          ${runtime.nativeSessionId}
         )
         ON CONFLICT (thread_id)
         DO UPDATE SET
@@ -182,7 +213,8 @@ export const make = Effect.gen(function* () {
           status = excluded.status,
           last_seen_at = excluded.last_seen_at,
           resume_cursor_json = excluded.resume_cursor_json,
-          runtime_payload_json = excluded.runtime_payload_json
+          runtime_payload_json = excluded.runtime_payload_json,
+          native_session_id = excluded.native_session_id
       `,
   });
 
@@ -200,9 +232,32 @@ export const make = Effect.gen(function* () {
           status,
           last_seen_at AS "lastSeenAt",
           resume_cursor_json AS "resumeCursor",
-          runtime_payload_json AS "runtimePayload"
+          runtime_payload_json AS "runtimePayload",
+          native_session_id AS "nativeSessionId"
         FROM provider_session_runtime
         WHERE thread_id = ${threadId}
+      `,
+  });
+
+  const getRuntimeRowByNativeSession = SqlSchema.findOneOption({
+    Request: GetProviderSessionRuntimeByNativeSessionInput,
+    Result: ProviderSessionRuntimeRawDbRowSchema,
+    execute: ({ providerName, nativeSessionId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          provider_name AS "providerName",
+          provider_instance_id AS "providerInstanceId",
+          adapter_key AS "adapterKey",
+          runtime_mode AS "runtimeMode",
+          status,
+          last_seen_at AS "lastSeenAt",
+          resume_cursor_json AS "resumeCursor",
+          runtime_payload_json AS "runtimePayload",
+          native_session_id AS "nativeSessionId"
+        FROM provider_session_runtime
+        WHERE provider_name = ${providerName}
+          AND native_session_id = ${nativeSessionId}
       `,
   });
 
@@ -220,7 +275,8 @@ export const make = Effect.gen(function* () {
           status,
           last_seen_at AS "lastSeenAt",
           resume_cursor_json AS "resumeCursor",
-          runtime_payload_json AS "runtimePayload"
+          runtime_payload_json AS "runtimePayload",
+          native_session_id AS "nativeSessionId"
         FROM provider_session_runtime
         ORDER BY last_seen_at ASC, thread_id ASC
       `,
@@ -265,6 +321,34 @@ export const make = Effect.gen(function* () {
                   "ProviderSessionRuntimeRepository.getByThreadId:decodeRow",
                   cause,
                   { threadId: input.threadId },
+                ),
+              ),
+              Effect.map((runtime) => Option.some(runtime)),
+            ),
+        }),
+      ),
+    );
+
+  const getByNativeSession: ProviderSessionRuntimeRepository["Service"]["getByNativeSession"] = (
+    input,
+  ) =>
+    getRuntimeRowByNativeSession(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProviderSessionRuntimeRepository.getByNativeSession:query",
+          "ProviderSessionRuntimeRepository.getByNativeSession:decodeRow",
+        ),
+      ),
+      Effect.flatMap((runtimeRowOption) =>
+        Option.match(runtimeRowOption, {
+          onNone: () => Effect.succeed(Option.none()),
+          onSome: (row) =>
+            decodeRuntimeRow(row).pipe(
+              Effect.mapError((cause) =>
+                PersistenceDecodeError.fromSchemaError(
+                  "ProviderSessionRuntimeRepository.getByNativeSession:decodeRow",
+                  cause,
+                  { threadId: row.threadId },
                 ),
               ),
               Effect.map((runtime) => Option.some(runtime)),
@@ -325,6 +409,7 @@ export const make = Effect.gen(function* () {
   return {
     upsert,
     getByThreadId,
+    getByNativeSession,
     list,
     deleteByThreadId,
   } satisfies ProviderSessionRuntimeRepository["Service"];

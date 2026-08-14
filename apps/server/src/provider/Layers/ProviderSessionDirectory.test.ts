@@ -4,7 +4,12 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+import {
+  NativeSessionId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { it, assert } from "@effect/vitest";
 import { assertSome } from "@effect/vitest/utils";
 import * as Effect from "effect/Effect";
@@ -138,6 +143,7 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T12:05:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-newer",
         },
@@ -154,6 +160,7 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
         runtimeMode: "approval-required",
         status: "starting",
         lastSeenAt: "2026-04-14T12:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-older",
         },
@@ -196,6 +203,82 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       ]);
     }));
 
+  it("refuses to let a second thread claim an already-imported native session", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const nativeSessionId = NativeSessionId.make("native-claimed");
+
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: ThreadId.make("thread-owner"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        nativeSessionId,
+      });
+
+      // The unique index is what makes import idempotent under concurrency:
+      // application-level checks cannot serialize two simultaneous imports.
+      const conflict = yield* directory
+        .upsert({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: ThreadId.make("thread-usurper"),
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          nativeSessionId,
+        })
+        .pipe(Effect.flip);
+      assert.include(conflict.operation, "ProviderSessionDirectory.upsert");
+
+      const owner = yield* directory.getBindingByNativeSession({
+        provider: ProviderDriverKind.make("codex"),
+        nativeSessionId,
+      });
+      assert.equal(Option.isSome(owner), true);
+      if (Option.isSome(owner)) {
+        assert.equal(owner.value.threadId, ThreadId.make("thread-owner"));
+      }
+    }));
+
+  it("keeps a thread's native session claim when an ordinary session write omits it", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = ThreadId.make("thread-imported");
+      const nativeSessionId = NativeSessionId.make("native-preserved");
+
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        nativeSessionId,
+      });
+
+      // Session lifecycle writes say nothing about native sessions; erasing the
+      // claim here would let the same session be imported a second time.
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "running",
+      });
+
+      const binding = yield* directory.getBinding(threadId);
+      assert.equal(Option.isSome(binding), true);
+      if (Option.isSome(binding)) {
+        assert.equal(binding.value.nativeSessionId, nativeSessionId);
+      }
+
+      // Passing null is the explicit release.
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        nativeSessionId: null,
+      });
+      const released = yield* directory.getBindingByNativeSession({
+        provider: ProviderDriverKind.make("codex"),
+        nativeSessionId,
+      });
+      assert.equal(Option.isNone(released), true);
+    }));
+
   it("resets adapterKey to the new provider when provider changes without an explicit adapter key", () =>
     Effect.gen(function* () {
       const directory = yield* ProviderSessionDirectory;
@@ -210,6 +293,7 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-01-01T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: null,
         runtimePayload: null,
       });

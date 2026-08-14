@@ -1,4 +1,5 @@
 import type {
+  NativeSessionId,
   ProviderInstanceId,
   ProviderDriverKind,
   ProviderSessionRuntimeStatus,
@@ -28,6 +29,14 @@ export interface ProviderRuntimeBinding {
   readonly resumeCursor?: unknown | null;
   readonly runtimePayload?: unknown | null;
   readonly runtimeMode?: RuntimeMode;
+  /**
+   * The harness-owned session this thread was imported from, when it was.
+   *
+   * Absent on an upsert means "leave whatever is stored alone", matching
+   * `resumeCursor`: ordinary session lifecycle writes must not erase the import
+   * binding. Pass `null` to explicitly release the claim.
+   */
+  readonly nativeSessionId?: NativeSessionId | null;
 }
 
 export interface ProviderRuntimeBindingWithMetadata extends ProviderRuntimeBinding {
@@ -52,6 +61,18 @@ export interface ProviderSessionDirectoryShape {
   readonly getBinding: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<ProviderRuntimeBinding>, ProviderSessionDirectoryReadError>;
+
+  /**
+   * Find the thread that owns an imported harness session, if one does.
+   *
+   * The reverse of {@link ProviderSessionDirectoryShape.getBinding}, and the
+   * lookup import idempotency is built on: the same `(provider, nativeId)` pair
+   * must always resolve to the thread that already adopted it.
+   */
+  readonly getBindingByNativeSession: (input: {
+    readonly provider: ProviderDriverKind;
+    readonly nativeSessionId: NativeSessionId;
+  }) => Effect.Effect<Option.Option<ProviderRuntimeBinding>, ProviderSessionDirectoryReadError>;
 
   readonly listThreadIds: () => Effect.Effect<
     ReadonlyArray<ThreadId>,

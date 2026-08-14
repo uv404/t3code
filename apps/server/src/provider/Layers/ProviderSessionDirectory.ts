@@ -77,6 +77,7 @@ function toRuntimeBinding(
           status: runtime.status,
           resumeCursor: runtime.resumeCursor,
           runtimePayload: runtime.runtimePayload,
+          nativeSessionId: runtime.nativeSessionId,
           lastSeenAt: runtime.lastSeenAt,
         }) satisfies ProviderRuntimeBindingWithMetadata,
     ),
@@ -99,6 +100,31 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         }),
       ),
     );
+
+  const getBindingByNativeSession: ProviderSessionDirectoryShape["getBindingByNativeSession"] = (
+    input,
+  ) =>
+    repository
+      .getByNativeSession({
+        providerName: input.provider,
+        nativeSessionId: input.nativeSessionId,
+      })
+      .pipe(
+        Effect.mapError(
+          toPersistenceError(
+            "ProviderSessionDirectory.getBindingByNativeSession:getByNativeSession",
+          ),
+        ),
+        Effect.flatMap((runtime) =>
+          Option.match(runtime, {
+            onNone: () => Effect.succeed(Option.none<ProviderRuntimeBinding>()),
+            onSome: (value) =>
+              toRuntimeBinding(value, "ProviderSessionDirectory.getBindingByNativeSession").pipe(
+                Effect.map((binding) => Option.some(binding)),
+              ),
+          }),
+        ),
+      );
 
   const upsert: ProviderSessionDirectoryShape["upsert"] = Effect.fn(function* (binding) {
     const existing = yield* repository
@@ -144,6 +170,14 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
           existingRuntime?.runtimePayload ?? null,
           binding.runtimePayload,
         ),
+        // Rebinding a thread to a different provider invalidates the import
+        // claim: the native session belongs to the harness that was replaced,
+        // and keeping the id would leave a stale (wrong-provider) owner behind.
+        nativeSessionId: providerChanged
+          ? (binding.nativeSessionId ?? null)
+          : binding.nativeSessionId !== undefined
+            ? binding.nativeSessionId
+            : (existingRuntime?.nativeSessionId ?? null),
       })
       .pipe(Effect.mapError(toPersistenceError("ProviderSessionDirectory.upsert:upsert")));
   });
@@ -186,6 +220,7 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
     upsert,
     getProvider,
     getBinding,
+    getBindingByNativeSession,
     listThreadIds,
     listBindings,
   } satisfies ProviderSessionDirectoryShape;
