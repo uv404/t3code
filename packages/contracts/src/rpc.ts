@@ -79,6 +79,14 @@ import {
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
+import {
+  DiscoverNativeSessionsInput,
+  DiscoverNativeSessionsResult,
+  ImportNativeSessionInput,
+  ImportNativeSessionResult,
+  NativeSessionDiscoveryError,
+  NativeSessionImportError,
+} from "./nativeSession.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   PullRequestActionInput,
@@ -319,6 +327,10 @@ export const WS_METHODS = {
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
+
+  // Native session methods
+  nativeSessionsDiscover: "nativeSessions.discover",
+  nativeSessionsImport: "nativeSessions.import",
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
@@ -968,6 +980,18 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
   },
 );
 
+export const WsNativeSessionsDiscoverRpc = Rpc.make(WS_METHODS.nativeSessionsDiscover, {
+  payload: DiscoverNativeSessionsInput,
+  success: DiscoverNativeSessionsResult,
+  error: Schema.Union([NativeSessionDiscoveryError, EnvironmentAuthorizationError]),
+});
+
+export const WsNativeSessionsImportRpc = Rpc.make(WS_METHODS.nativeSessionsImport, {
+  payload: ImportNativeSessionInput,
+  success: ImportNativeSessionResult,
+  error: Schema.Union([NativeSessionImportError, EnvironmentAuthorizationError]),
+});
+
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1129,4 +1153,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsNativeSessionsDiscoverRpc,
+  WsNativeSessionsImportRpc,
 );

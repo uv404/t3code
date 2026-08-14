@@ -16,6 +16,7 @@ import {
   GitCommandError,
   KeybindingRule,
   MessageId,
+  NativeSessionId,
   ExternalLauncherCommandNotFoundError,
   OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
@@ -115,6 +116,7 @@ import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
+import * as NativeSessionImport from "./orchestration/Services/NativeSessionImport.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -418,6 +420,7 @@ const buildAppUnderTest = (options?: {
     threadDeletionReactor?: Partial<ThreadDeletionReactor["Service"]>;
     analyticsService?: Partial<AnalyticsService.AnalyticsService["Service"]>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
+    nativeSessionImport?: Partial<NativeSessionImport.NativeSessionImport["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
     browserTraceCollector?: Partial<BrowserTraceCollector.BrowserTraceCollector["Service"]>;
     serverLifecycleEvents?: Partial<ServerLifecycleEvents.ServerLifecycleEvents["Service"]>;
@@ -846,23 +849,30 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: "",
-            }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: "",
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+          // No router-seam test exercises `nativeSessions.*` — this only needs
+          // to satisfy `websocketRpcRouteLayer`'s context.
+          Layer.mock(NativeSessionImport.NativeSessionImport)({
+            ...options?.layers?.nativeSessionImport,
+          }),
+        ),
       ),
     );
 
@@ -6640,6 +6650,58 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           messageCreatedAt: now,
         },
       ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc nativeSessions methods", () =>
+    Effect.gen(function* () {
+      const nativeId = NativeSessionId.make("native-1");
+      const threadId = ThreadId.make("thread-imported");
+      const discoveryResult = {
+        sessions: [
+          {
+            session: {
+              provider: ProviderDriverKind.make("codex"),
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              nativeId,
+              title: "t3-explore",
+              cwd: "/tmp/project-a",
+              source: "cli" as const,
+              activity: "notLoaded" as const,
+              resumeCursor: { threadId: "codex-thread-1" },
+            },
+            importState: { _tag: "notImported" as const },
+          },
+        ],
+        unsupportedProviders: [],
+      };
+      const importResult = { threadId, created: true };
+
+      yield* buildAppUnderTest({
+        layers: {
+          nativeSessionImport: {
+            discover: () => Effect.succeed(discoveryResult),
+            importSession: () => Effect.succeed(importResult),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const discoverResponse = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.nativeSessionsDiscover]({})),
+      );
+      assert.deepEqual(discoverResponse, discoveryResult);
+
+      const importResponse = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.nativeSessionsImport]({
+            provider: ProviderDriverKind.make("codex"),
+            nativeId,
+            projectId: ProjectId.make("project-a"),
+          }),
+        ),
+      );
+      assert.deepEqual(importResponse, importResult);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
