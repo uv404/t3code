@@ -2028,7 +2028,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      // Grok speaks ACP, which defines `session/list`, but the xAI agent binary
+      // is not known to implement it. Left unsupported until verified against a
+      // real binary rather than advertising discovery that returns nothing.
+      capabilities: { sessionModelSwitch: "in-session", nativeSessionDiscovery: "unsupported" },
       startSession,
       sendTurn,
       interruptTurn,

@@ -330,7 +330,9 @@ describe("ProviderCommandReactor", () => {
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
+          nativeSessionDiscovery: "unsupported" as const,
         }),
+      discoverNativeSessions: () => Effect.succeed({ sessions: [], unsupportedProviders: [] }),
       getInstanceInfo: (instanceId) => {
         const raw = String(instanceId);
         const driverKind = ProviderDriverKind.make(

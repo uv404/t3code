@@ -20,6 +20,7 @@ import {
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
+  type NativeSessionSummary,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
@@ -1075,6 +1076,61 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const getInstanceInfo: ProviderServiceMethod<"getInstanceInfo"> = (instanceId) =>
     registry.getInstanceInfo(instanceId);
 
+  const discoverNativeSessions: ProviderServiceMethod<"discoverNativeSessions"> = Effect.fn(
+    "discoverNativeSessions",
+  )(function* (input) {
+    const targets = input.providerInstanceId
+      ? [input.providerInstanceId]
+      : yield* registry.listInstances();
+
+    const sessions: Array<NativeSessionSummary> = [];
+    const unsupportedProviders: Array<ProviderDriverKind> = [];
+    let nextCursor: string | undefined;
+
+    for (const instanceId of targets) {
+      const adapter = yield* registry.getByInstance(instanceId).pipe(Effect.option);
+      if (Option.isNone(adapter)) continue;
+
+      const discover = adapter.value.discoverNativeSessions;
+      if (adapter.value.capabilities.nativeSessionDiscovery !== "supported" || !discover) {
+        if (!unsupportedProviders.includes(adapter.value.provider)) {
+          unsupportedProviders.push(adapter.value.provider);
+        }
+        continue;
+      }
+
+      // One harness failing to answer must not blank the whole picker; the
+      // others' sessions are still valid results.
+      const page = yield* discover({ ...input, providerInstanceId: instanceId }).pipe(
+        Effect.tapError((cause) =>
+          Effect.logWarning("native session discovery failed for provider instance", {
+            instanceId,
+            provider: adapter.value.provider,
+            cause,
+          }),
+        ),
+        Effect.option,
+      );
+      if (Option.isNone(page)) continue;
+
+      sessions.push(...page.value.sessions);
+      // Only meaningful for a single-instance query — see NativeSessionDiscoveryPage.
+      if (input.providerInstanceId !== undefined) nextCursor = page.value.nextCursor;
+    }
+
+    // Newest first across providers, so a fan-out reads as one list rather than
+    // as per-provider blocks.
+    sessions.sort((left, right) =>
+      (right.lastActiveAt ?? "").localeCompare(left.lastActiveAt ?? ""),
+    );
+
+    return {
+      sessions,
+      ...(nextCursor ? { nextCursor } : {}),
+      unsupportedProviders,
+    };
+  });
+
   const rollbackConversation: ProviderServiceMethod<"rollbackConversation"> = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -1227,6 +1283,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     listSessions,
     getCapabilities,
     getInstanceInfo,
+    discoverNativeSessions,
     rollbackConversation,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple

@@ -78,7 +78,8 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
-import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { makeClaudeEnvironment, resolveClaudeHomePath } from "../Drivers/ClaudeHome.ts";
+import { discoverClaudeNativeSessions } from "./ClaudeNativeSessionDiscovery.ts";
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -4684,6 +4685,26 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return context !== undefined && !context.stopped;
     });
 
+  const discoverNativeSessions: NonNullable<ClaudeAdapterShape["discoverNativeSessions"]> = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const homePath = yield* resolveClaudeHomePath(claudeSettings).pipe(
+        Effect.provideService(Path.Path, path),
+      );
+      return yield* discoverClaudeNativeSessions(
+        {
+          provider: PROVIDER,
+          providerInstanceId: boundInstanceId,
+          homePath,
+        },
+        input,
+      );
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+
   const stopSessions = Effect.fn("stopSessions")(function* (
     contexts: ReadonlyArray<ClaudeSessionContext>,
     emitExitEvent: boolean,
@@ -4716,6 +4737,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      nativeSessionDiscovery: "supported",
     },
     startSession,
     sendTurn,
@@ -4727,6 +4749,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
+    discoverNativeSessions,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

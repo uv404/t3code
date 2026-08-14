@@ -3138,6 +3138,10 @@ export function makeOpenCodeAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        // The OpenCode server exposes a session listing, but its sessions are
+        // server-owned rather than "native CLI sessions T3 can't see", so the
+        // import surface would be misleading. Revisit if that changes.
+        nativeSessionDiscovery: "unsupported",
       },
       startSession,
       sendTurn,
