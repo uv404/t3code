@@ -195,6 +195,36 @@ export const ImportNativeSessionResult = Schema.Struct({
 });
 export type ImportNativeSessionResult = typeof ImportNativeSessionResult.Type;
 
+/** A read-only transcript projection supplied by the provider harness. */
+export const NativeSessionHistoryEntry = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  role: Schema.Literals(["user", "assistant", "system"]),
+  text: Schema.String,
+  createdAt: Schema.optional(IsoDateTime),
+});
+export type NativeSessionHistoryEntry = typeof NativeSessionHistoryEntry.Type;
+
+export const NativeSessionHistory = Schema.Struct({
+  provider: ProviderDriverKind,
+  nativeId: NativeSessionId,
+  entries: Schema.Array(NativeSessionHistoryEntry),
+});
+export type NativeSessionHistory = typeof NativeSessionHistory.Type;
+
+export const NativeSessionHistoryInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type NativeSessionHistoryInput = typeof NativeSessionHistoryInput.Type;
+
+export class NativeSessionHistoryError extends Schema.TaggedErrorClass<NativeSessionHistoryError>()(
+  "NativeSessionHistoryError",
+  {
+    message: TrimmedNonEmptyString,
+    reason: Schema.Literals(["notFound", "unsupported", "failed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export class NativeSessionDiscoveryError extends Schema.TaggedErrorClass<NativeSessionDiscoveryError>()(
   "NativeSessionDiscoveryError",
   {

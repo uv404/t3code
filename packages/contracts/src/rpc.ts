@@ -84,6 +84,9 @@ import {
   DiscoverNativeSessionsResult,
   ImportNativeSessionInput,
   ImportNativeSessionResult,
+  NativeSessionHistory,
+  NativeSessionHistoryError,
+  NativeSessionHistoryInput,
   NativeSessionDiscoveryError,
   NativeSessionImportError,
 } from "./nativeSession.ts";
@@ -331,6 +334,7 @@ export const WS_METHODS = {
   // Native session methods
   nativeSessionsDiscover: "nativeSessions.discover",
   nativeSessionsImport: "nativeSessions.import",
+  nativeSessionsHistory: "nativeSessions.history",
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
@@ -992,6 +996,12 @@ export const WsNativeSessionsImportRpc = Rpc.make(WS_METHODS.nativeSessionsImpor
   error: Schema.Union([NativeSessionImportError, EnvironmentAuthorizationError]),
 });
 
+export const WsNativeSessionsHistoryRpc = Rpc.make(WS_METHODS.nativeSessionsHistory, {
+  payload: NativeSessionHistoryInput,
+  success: NativeSessionHistory,
+  error: Schema.Union([NativeSessionHistoryError, EnvironmentAuthorizationError]),
+});
+
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1155,4 +1165,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeThreadRpc,
   WsNativeSessionsDiscoverRpc,
   WsNativeSessionsImportRpc,
+  WsNativeSessionsHistoryRpc,
 );
