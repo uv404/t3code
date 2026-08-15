@@ -26,11 +26,13 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   NativeSessionDiscoveryError,
+  NativeSessionHistoryError,
   NativeSessionImportError,
   ThreadId,
   type DiscoveredNativeSession,
   type ImportNativeSessionInput,
   type NativeSessionActivity,
+  type NativeSessionHistoryInput,
   type NativeSessionImportState,
   type NativeSessionSummary,
   type ProviderInstanceId,
@@ -376,7 +378,56 @@ const make = Effect.gen(function* () {
     },
   );
 
-  return { discover, importSession } satisfies NativeSessionImportShape;
+  const history: NativeSessionImportShape["history"] = Effect.fn("readNativeSessionHistory")(
+    function* (input: NativeSessionHistoryInput) {
+      const binding = yield* directory.getBinding(input.threadId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new NativeSessionHistoryError({
+              message: `Failed to read the imported session binding for thread '${input.threadId}'.`,
+              reason: "failed",
+              cause,
+            }),
+        ),
+      );
+      if (Option.isNone(binding) || binding.value.nativeSessionId == null) {
+        return yield* new NativeSessionHistoryError({
+          message: "This thread is not an imported native session.",
+          reason: "notFound",
+        });
+      }
+      if (binding.value.providerInstanceId === undefined) {
+        return yield* new NativeSessionHistoryError({
+          message:
+            "The imported session is missing its provider instance, so history cannot be read.",
+          reason: "failed",
+        });
+      }
+      if (providerService.readNativeSession === undefined) {
+        return yield* new NativeSessionHistoryError({
+          message: "This server cannot read provider-owned session history.",
+          reason: "unsupported",
+        });
+      }
+      return yield* providerService
+        .readNativeSession({
+          providerInstanceId: binding.value.providerInstanceId,
+          nativeSessionId: binding.value.nativeSessionId,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new NativeSessionHistoryError({
+                message: cause.message,
+                reason: "unsupported",
+                cause,
+              }),
+          ),
+        );
+    },
+  );
+
+  return { discover, importSession, history } satisfies NativeSessionImportShape;
 });
 
 export const NativeSessionImportLive = Layer.effect(NativeSessionImport, make);

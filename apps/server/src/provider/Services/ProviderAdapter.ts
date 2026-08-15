@@ -11,6 +11,8 @@ import type {
   ApprovalRequestId,
   DiscoverNativeSessionsInput,
   NativeSessionPage,
+  NativeSessionHistory,
+  NativeSessionId,
   ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderUserInputAnswers,
@@ -130,6 +132,11 @@ export interface ProviderAdapterShape<TError> {
   readonly discoverNativeSessions?: (
     input: DiscoverNativeSessionsInput,
   ) => Effect.Effect<NativeSessionPage, TError>;
+
+  /** Read a native transcript without adopting or opening a writable session. */
+  readonly readNativeSession?: (
+    nativeSessionId: NativeSessionId,
+  ) => Effect.Effect<NativeSessionHistory, TError>;
 
   /**
    * Check whether this adapter owns an active session id.

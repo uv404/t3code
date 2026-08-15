@@ -2530,6 +2530,10 @@ const makeWsRpcLayer = (
             nativeSessionImport.importSession(input),
             { "rpc.aggregate": "nativeSessions" },
           ),
+        [WS_METHODS.nativeSessionsHistory]: (input) =>
+          observeRpcEffect(WS_METHODS.nativeSessionsHistory, nativeSessionImport.history(input), {
+            "rpc.aggregate": "nativeSessions",
+          }),
       });
     }),
   );

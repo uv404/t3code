@@ -14,6 +14,8 @@
 import type {
   DiscoverNativeSessionsInput,
   NativeSessionDiscoveryPage,
+  NativeSessionHistory,
+  NativeSessionId,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
@@ -111,6 +113,11 @@ export interface ProviderServiceShape {
   readonly discoverNativeSessions: (
     input: DiscoverNativeSessionsInput,
   ) => Effect.Effect<NativeSessionDiscoveryPage, ProviderServiceError>;
+
+  readonly readNativeSession?: (input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly nativeSessionId: NativeSessionId;
+  }) => Effect.Effect<NativeSessionHistory, ProviderServiceError>;
 
   readonly getInstanceInfo: (
     instanceId: ProviderInstanceId,

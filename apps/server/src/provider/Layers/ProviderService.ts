@@ -21,6 +21,7 @@ import {
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
   type NativeSessionSummary,
+  type NativeSessionId,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
@@ -1131,6 +1132,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     };
   });
 
+  const readNativeSession: ProviderServiceMethod<"readNativeSession"> = Effect.fn(
+    "readNativeSession",
+  )(function* (input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly nativeSessionId: NativeSessionId;
+  }) {
+    const adapter = yield* registry.getByInstance(input.providerInstanceId);
+    const read = adapter.readNativeSession;
+    if (!read) {
+      return yield* new ProviderValidationError({
+        operation: "ProviderService.readNativeSession",
+        issue: `Provider '${adapter.provider}' does not expose read-only native session history.`,
+      });
+    }
+    return yield* read(input.nativeSessionId);
+  });
+
   const rollbackConversation: ProviderServiceMethod<"rollbackConversation"> = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -1284,6 +1302,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getCapabilities,
     getInstanceInfo,
     discoverNativeSessions,
+    readNativeSession,
     rollbackConversation,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple

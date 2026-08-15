@@ -23,6 +23,9 @@ import type {
   DiscoverNativeSessionsResult,
   ImportNativeSessionInput,
   ImportNativeSessionResult,
+  NativeSessionHistory,
+  NativeSessionHistoryError,
+  NativeSessionHistoryInput,
   NativeSessionDiscoveryError,
   NativeSessionImportError,
 } from "@t3tools/contracts";
@@ -50,6 +53,11 @@ export interface NativeSessionImportShape {
   readonly importSession: (
     input: ImportNativeSessionInput,
   ) => Effect.Effect<ImportNativeSessionResult, NativeSessionImportError>;
+
+  /** Read the provider-owned transcript for an imported thread, if supported. */
+  readonly history: (
+    input: NativeSessionHistoryInput,
+  ) => Effect.Effect<NativeSessionHistory, NativeSessionHistoryError>;
 }
 
 export class NativeSessionImport extends Context.Service<

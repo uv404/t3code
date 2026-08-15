@@ -24,6 +24,10 @@ export function createNativeSessionEnvironmentAtoms<R, E>(
       label: "environment-data:native-sessions:discover",
       tag: WS_METHODS.nativeSessionsDiscover,
     }),
+    history: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:native-sessions:history",
+      tag: WS_METHODS.nativeSessionsHistory,
+    }),
     import: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:native-sessions:import",
       tag: WS_METHODS.nativeSessionsImport,

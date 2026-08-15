@@ -65,7 +65,10 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
-import { discoverCodexNativeSessions } from "./CodexNativeSessionDiscovery.ts";
+import {
+  discoverCodexNativeSessions,
+  readCodexNativeSessionHistory,
+} from "./CodexNativeSessionDiscovery.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -2022,6 +2025,33 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
+  const readNativeSession: NonNullable<CodexAdapterShape["readNativeSession"]> = (
+    nativeSessionId,
+  ) =>
+    readCodexNativeSessionHistory(
+      {
+        provider: PROVIDER,
+        ...(boundInstanceId ? { providerInstanceId: boundInstanceId } : {}),
+        binaryPath: codexConfig.binaryPath,
+        ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+        ...(codexConfig.launchArgs ? { launchArgs: codexConfig.launchArgs } : {}),
+        ...(options?.environment ? { environment: options.environment } : {}),
+        spawnCwd: process.cwd(),
+      },
+      nativeSessionId,
+    ).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "thread/read",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
       concurrency: 1,
@@ -2054,6 +2084,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     listSessions,
     hasSession,
     discoverNativeSessions,
+    readNativeSession,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

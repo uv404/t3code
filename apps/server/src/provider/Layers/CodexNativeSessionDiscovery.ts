@@ -14,6 +14,8 @@
  */
 import {
   NativeSessionId,
+  type NativeSessionHistory,
+  type NativeSessionHistoryEntry,
   type DiscoverNativeSessionsInput,
   type NativeSessionActivity,
   type NativeSessionPage,
@@ -53,6 +55,40 @@ export interface CodexNativeSessionDiscoveryOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /** Working directory for the probe process itself, not a result filter. */
   readonly spawnCwd: string;
+}
+
+function toNativeHistoryEntries(
+  turns: ReadonlyArray<EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]>,
+): ReadonlyArray<NativeSessionHistoryEntry> {
+  const entries: Array<NativeSessionHistoryEntry> = [];
+  for (const turn of turns) {
+    for (const item of turn.items) {
+      if (item.type === "userMessage") {
+        const text = item.content
+          .flatMap((content) => (content.type === "text" ? [content.text] : []))
+          .join("\n")
+          .trim();
+        if (text.length > 0) {
+          const createdAt = toIsoDateTime(turn.startedAt);
+          entries.push({
+            id: `${turn.id}:${item.id}`,
+            role: "user",
+            text,
+            ...(createdAt ? { createdAt } : {}),
+          });
+        }
+      } else if (item.type === "agentMessage" && item.text.trim().length > 0) {
+        const createdAt = toIsoDateTime(turn.startedAt);
+        entries.push({
+          id: `${turn.id}:${item.id}`,
+          role: "assistant",
+          text: item.text,
+          ...(createdAt ? { createdAt } : {}),
+        });
+      }
+    }
+  }
+  return entries;
 }
 
 /**
@@ -227,5 +263,74 @@ export const discoverCodexNativeSessions = (
         sessions: response.data.map((thread) => toNativeSessionSummary(thread, options)),
         ...(nextCursor ? { nextCursor } : {}),
       } satisfies NativeSessionPage;
+    }),
+  );
+
+/**
+ * Read the human-facing portion of a Codex rollout without resuming it.
+ * `thread/read` is intentionally used instead of `thread/resume`: it does not
+ * claim the rollout's writer lock, so history remains available while the
+ * original terminal still owns the session.
+ */
+export const readCodexNativeSessionHistory = (
+  options: CodexNativeSessionDiscoveryOptions,
+  nativeSessionId: NativeSessionId,
+): Effect.Effect<
+  NativeSessionHistory,
+  CodexErrors.CodexAppServerError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const scope = yield* Scope.Scope;
+      const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
+      const env = {
+        ...options.environment,
+        ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
+      };
+      const extendEnv = options.environment === undefined;
+      const appServerArgs = codexSessionAppServerArgs(undefined, options.launchArgs);
+      const spawnCommand = yield* resolveSpawnCommand(options.binaryPath, appServerArgs, {
+        env,
+        extendEnv,
+      });
+      const child = yield* spawner
+        .spawn(
+          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+            cwd: options.spawnCwd,
+            env,
+            extendEnv,
+            forceKillAfter: CODEX_APP_SERVER_FORCE_KILL_AFTER,
+            shell: spawnCommand.shell,
+          }),
+        )
+        .pipe(
+          Effect.provideService(Scope.Scope, scope),
+          Effect.mapError(
+            (cause) =>
+              new CodexErrors.CodexAppServerSpawnError({
+                command: `${options.binaryPath} app-server`,
+                cause,
+              }),
+          ),
+        );
+      const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
+        Layer.build,
+        Effect.provideService(Scope.Scope, scope),
+      );
+      const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+        Effect.provide(clientContext),
+      );
+      yield* client.request("initialize", buildCodexInitializeParams());
+      const response = yield* client.request("thread/read", {
+        threadId: String(nativeSessionId),
+        includeTurns: true,
+      });
+      return {
+        provider: options.provider,
+        nativeId: nativeSessionId,
+        entries: toNativeHistoryEntries(response.thread.turns),
+      } satisfies NativeSessionHistory;
     }),
   );
