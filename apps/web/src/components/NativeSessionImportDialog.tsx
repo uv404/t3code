@@ -17,7 +17,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   DownloadIcon,
-  FolderIcon,
   LoaderCircleIcon,
   SearchIcon,
   TerminalIcon,
@@ -33,6 +32,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import { useProjects } from "../state/entities";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { cn } from "../lib/utils";
+import { ProjectFavicon } from "./ProjectFavicon";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -44,6 +44,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 type SelectedSession = {
@@ -108,8 +109,8 @@ function NativeSessionEnvironmentList(props: {
   const error = AsyncResult.isFailure(result) ? Cause.squash(result.cause) : null;
 
   return (
-    <section className="flex min-h-0 flex-col gap-2">
-      <div className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
+    <section className="flex min-h-0 flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         <span className="truncate">{props.environmentLabel}</span>
         {result.waiting ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : null}
       </div>
@@ -123,7 +124,7 @@ function NativeSessionEnvironmentList(props: {
           No native sessions found.
         </p>
       ) : null}
-      <div className="flex min-h-0 flex-col gap-1 overflow-y-auto">
+      <div className="flex min-h-0 flex-col gap-1">
         {sessions.map((discovered) => {
           const session = discovered.session;
           const imported = discovered.importState._tag === "imported";
@@ -138,7 +139,7 @@ function NativeSessionEnvironmentList(props: {
               type="button"
               disabled={blocked}
               className={cn(
-                "flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                "flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
                 isSelected
                   ? "border-primary/60 bg-primary/8"
                   : "border-border/70 hover:bg-muted/60",
@@ -157,24 +158,22 @@ function NativeSessionEnvironmentList(props: {
                 }
               }}
             >
-              <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <TerminalIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{sessionTitle(session)}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {sessionSubtitle(session)}
+                <span className="block truncate text-[13px] font-medium leading-5">
+                  {sessionTitle(session)}
                 </span>
-                <span
-                  className={cn(
-                    "mt-1 block text-[11px]",
-                    blocked ? "text-destructive" : "text-muted-foreground",
-                  )}
-                >
-                  {imported
-                    ? importStateLabel(discovered.importState)
-                    : activityLabel(session.activity)}
+                <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+                  <span className="min-w-0 truncate">{sessionSubtitle(session)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className={cn("shrink-0", blocked && "text-destructive")}>
+                    {imported
+                      ? importStateLabel(discovered.importState)
+                      : activityLabel(session.activity)}
+                  </span>
                 </span>
               </span>
-              {isSelected ? <CheckIcon className="mt-0.5 size-4 shrink-0 text-primary" /> : null}
+              {isSelected ? <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-primary" /> : null}
             </button>
           );
         })}
@@ -220,6 +219,11 @@ export function NativeSessionImportDialog() {
     const exact = inEnvironment.filter((project) => project.workspaceRoot === cwd);
     return exact.length > 0 ? exact : inEnvironment;
   }, [projects, selected]);
+
+  const selectedProject = useMemo(
+    () => selectedProjects.find((project) => project.id === projectId) ?? null,
+    [selectedProjects, projectId],
+  );
 
   const selectedSessionIsUnknown = selected?.discovered.session.activity === "unknown";
   const canImport =
@@ -320,87 +324,114 @@ export function NativeSessionImportDialog() {
       </Tooltip>
       <Dialog open={open} onOpenChange={setOpen}>
         {open ? (
-          <DialogPopup className="max-w-2xl" bottomStickOnMobile={false}>
-            <DialogHeader>
-              <DialogTitle>Import native session</DialogTitle>
+          <DialogPopup
+            className="max-h-[min(760px,calc(100dvh-1rem))] max-w-2xl overflow-hidden"
+            bottomStickOnMobile={false}
+          >
+            <DialogHeader className="shrink-0 p-4 pb-2">
+              <DialogTitle>
+                {selected ? "Choose import location" : "Import native session"}
+              </DialogTitle>
               <DialogDescription>
-                Resume a session started in a provider’s terminal or another client.
+                {selected
+                  ? "Choose the T3 project for this session."
+                  : "Resume a session started in a provider’s terminal or another client."}
               </DialogDescription>
-              <div className="relative mt-2">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.currentTarget.value)}
-                  placeholder="Search sessions"
-                  aria-label="Search native sessions"
-                  className="pl-9"
-                />
-              </div>
-            </DialogHeader>
-            <DialogPanel className="flex min-h-0 flex-col gap-5">
-              {environments.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No connected environments.</p>
-              ) : (
-                environments.map((environment) => (
-                  <NativeSessionEnvironmentList
-                    key={environment.environmentId}
-                    environmentId={environment.environmentId}
-                    environmentLabel={environment.label}
-                    searchTerm={searchTerm}
-                    selected={selected}
-                    onSelect={setSelected}
-                    onOpenImported={handleOpenImported}
+              {!selected ? (
+                <div className="relative mt-1">
+                  <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.currentTarget.value)}
+                    placeholder="Search sessions"
+                    aria-label="Search native sessions"
+                    className="pl-9"
                   />
-                ))
-              )}
+                </div>
+              ) : null}
+            </DialogHeader>
+            <DialogPanel className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
               {selected ? (
-                <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-muted/25 p-4">
-                  <div>
-                    <p className="text-sm font-medium">Import settings</p>
-                    <p className="text-xs text-muted-foreground">
-                      Choose where this session should appear in T3.
-                    </p>
+                <div className="shrink-0 rounded-lg border border-border/70 bg-muted/25 p-3">
+                  <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {sessionTitle(selected.discovered.session)}
+                      </p>
+                      <p className="truncate text-[11px] text-muted-foreground">
+                        {providerLabel(selected.discovered.session.provider)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">Import to</span>
                   </div>
-                  <label className="flex flex-col gap-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">Project</span>
-                    <span className="relative">
-                      <FolderIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                      <select
-                        value={projectId}
-                        onChange={(event) => setProjectId(event.currentTarget.value as ProjectId)}
-                        className="h-9 w-full appearance-none rounded-md border border-input bg-background pl-9 pr-8 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label="Import project"
-                      >
-                        <option value="">Select a project</option>
-                        {selectedProjects.map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.workspaceRoot}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    </span>
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-sm">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      Thread title (optional)
-                    </span>
-                    <Input
-                      value={title}
-                      onChange={(event) => setTitle(event.currentTarget.value)}
-                    />
-                  </label>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+                    <label className="flex min-w-0 flex-col gap-1 text-sm">
+                      <span className="text-[11px] font-medium text-muted-foreground">Project</span>
+                      <Menu>
+                        <MenuTrigger
+                          aria-label="Import project"
+                          className="flex h-8 w-full items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {selectedProject ? (
+                            <ProjectFavicon
+                              environmentId={selectedProject.environmentId}
+                              cwd={selectedProject.workspaceRoot}
+                              faviconPath={selectedProject.faviconPath}
+                              className="size-3.5 shrink-0"
+                            />
+                          ) : null}
+                          <span className="min-w-0 flex-1 truncate text-left">
+                            {selectedProject?.title ?? "Select a project"}
+                          </span>
+                          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        </MenuTrigger>
+                        <MenuPopup align="start" className="w-(--anchor-width)">
+                          <MenuRadioGroup
+                            value={projectId}
+                            onValueChange={(value) => setProjectId(value as ProjectId)}
+                          >
+                            {selectedProjects.map((project) => (
+                              <MenuRadioItem key={project.id} value={project.id}>
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  <ProjectFavicon
+                                    environmentId={project.environmentId}
+                                    cwd={project.workspaceRoot}
+                                    faviconPath={project.faviconPath}
+                                    className="size-3.5 shrink-0"
+                                  />
+                                  <span className="truncate" title={project.workspaceRoot}>
+                                    {project.title}
+                                  </span>
+                                </span>
+                              </MenuRadioItem>
+                            ))}
+                          </MenuRadioGroup>
+                        </MenuPopup>
+                      </Menu>
+                    </label>
+                    <label className="flex min-w-0 flex-col gap-1 text-sm">
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        Thread title
+                      </span>
+                      <Input
+                        value={title}
+                        onChange={(event) => setTitle(event.currentTarget.value)}
+                        className="h-8 text-xs"
+                        placeholder="Use session title"
+                      />
+                    </label>
+                  </div>
                   {selectedSessionIsUnknown ? (
-                    <label className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 p-3 text-sm">
+                    <label className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/8 p-2 text-xs">
                       <input
                         type="checkbox"
                         checked={acknowledged}
                         onChange={(event) => setAcknowledged(event.currentTarget.checked)}
-                        className="mt-0.5 size-4 accent-amber-600"
+                        className="mt-0.5 size-3.5 accent-amber-600"
                       />
                       <span>
                         <span className="block font-medium">Activity cannot be verified</span>
-                        <span className="block text-xs text-muted-foreground">
+                        <span className="block text-[11px] text-muted-foreground">
                           T3 cannot tell whether a terminal still has this session open. Importing
                           may create two writers.
                         </span>
@@ -410,20 +441,59 @@ export function NativeSessionImportDialog() {
                 </div>
               ) : null}
               {selected && selectedProjects.length === 0 ? (
-                <p className="text-sm text-destructive">
+                <p className="shrink-0 text-xs text-destructive">
                   This session is not inside a configured project. Add the project first, then try
                   again.
                 </p>
               ) : null}
-              {error ? <p className="text-sm text-destructive">{error}</p> : null}
+              {error ? <p className="shrink-0 text-xs text-destructive">{error}</p> : null}
+              {!selected ? (
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+                  {environments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No connected environments.</p>
+                  ) : (
+                    environments.map((environment) => (
+                      <NativeSessionEnvironmentList
+                        key={environment.environmentId}
+                        environmentId={environment.environmentId}
+                        environmentLabel={environment.label}
+                        searchTerm={searchTerm}
+                        selected={selected}
+                        onSelect={setSelected}
+                        onOpenImported={handleOpenImported}
+                      />
+                    ))
+                  )}
+                </div>
+              ) : null}
             </DialogPanel>
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+            <DialogFooter className="shrink-0 px-4 py-2.5">
+              <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button type="button" disabled={!canImport} onClick={() => void handleImport()}>
-                Import session
-              </Button>
+              {selected ? (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setSelected(null);
+                      setError(null);
+                    }}
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!canImport}
+                    onClick={() => void handleImport()}
+                  >
+                    Import session
+                  </Button>
+                </>
+              ) : null}
             </DialogFooter>
           </DialogPopup>
         ) : null}

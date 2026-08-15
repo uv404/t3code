@@ -4,7 +4,7 @@ import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
-  type MessageId,
+  MessageId,
   type ModelSelection,
   type ProjectScript,
   type ProjectId,
@@ -84,6 +84,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
@@ -201,6 +202,7 @@ import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
+import { nativeSessionEnvironment } from "../state/nativeSessions";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -1290,6 +1292,16 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  const nativeHistoryResult = useAtomValue(
+    nativeSessionEnvironment.history({
+      environmentId,
+      input: { threadId },
+    }),
+  );
+  const nativeHistory =
+    routeKind === "server"
+      ? (Option.getOrElse(AsyncResult.value(nativeHistoryResult), () => null)?.entries ?? [])
+      : [];
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
@@ -2596,8 +2608,21 @@ function ChatViewContent(props: ChatViewProps) {
     [serverAttachmentIds, serverAttachmentUrls],
   );
   const displayServerMessages = useMemo<ReadonlyArray<ChatMessage>>(() => {
-    if (!serverMessages) return [];
-    return serverMessages.map((message) => {
+    const nativeMessages: Array<ChatMessage> = nativeHistory.map((entry) => ({
+      id: MessageId.make(`native:${entry.id}`),
+      role: entry.role,
+      text: entry.text,
+      turnId: null,
+      streaming: false,
+      createdAt: entry.createdAt ?? "1970-01-01T00:00:00.000Z",
+      updatedAt: entry.createdAt ?? "1970-01-01T00:00:00.000Z",
+    }));
+    if (!serverMessages) return nativeMessages;
+    const serverMessageIds = new Set(serverMessages.map((message) => String(message.id)));
+    const visibleNativeMessages = nativeMessages.filter(
+      (message) => !serverMessageIds.has(String(message.id)),
+    );
+    return [...visibleNativeMessages, ...serverMessages].map((message) => {
       if (!message.attachments || message.attachments.length === 0) {
         return message;
       }
@@ -2609,7 +2634,7 @@ function ChatViewContent(props: ChatViewProps) {
         }),
       };
     });
-  }, [serverAttachmentUrlById, serverMessages]);
+  }, [nativeHistory, serverAttachmentUrlById, serverMessages]);
   useEffect(() => {
     if (typeof Image === "undefined" || displayServerMessages.length === 0) {
       return;
