@@ -28,7 +28,7 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import { ProviderAdapterProcessError, ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -48,6 +48,7 @@ import {
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
+const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
 type ProviderIntentEvent = Extract<
@@ -235,6 +236,26 @@ function findProviderAdapterRequestError(
   return isProviderAdapterRequestError(failReason?.error) ? failReason.error : undefined;
 }
 
+/** Turn provider process failures into guidance users can act on. */
+export function formatProviderFailureDetail(cause: Cause.Cause<unknown>): string {
+  const failReason = cause.reasons.find(Cause.isFailReason);
+  const providerError = isProviderAdapterRequestError(failReason?.error)
+    ? failReason.error
+    : undefined;
+  if (providerError) {
+    return providerError.detail;
+  }
+
+  const processError = isProviderAdapterProcessError(failReason?.error)
+    ? failReason.error
+    : undefined;
+  if (processError && /already has an active writer/i.test(processError.detail)) {
+    return `This ${processError.provider} session is already open in another process. Close the original ${processError.provider} session before starting a turn here.`;
+  }
+
+  return Cause.pretty(cause);
+}
+
 function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
   const error = findProviderAdapterRequestError(cause);
   if (error) {
@@ -369,17 +390,6 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
-
-  const formatFailureDetail = (cause: Cause.Cause<unknown>): string => {
-    const failReason = cause.reasons.find(Cause.isFailReason);
-    const providerError = isProviderAdapterRequestError(failReason?.error)
-      ? failReason.error
-      : undefined;
-    if (providerError) {
-      return providerError.detail;
-    }
-    return Cause.pretty(cause);
-  };
 
   const setThreadSession = (input: {
     readonly threadId: ThreadId;
@@ -1170,7 +1180,7 @@ const make = Effect.gen(function* () {
       if (Cause.hasInterruptsOnly(cause)) {
         return Effect.void;
       }
-      const detail = formatFailureDetail(cause);
+      const detail = formatProviderFailureDetail(cause);
       return setThreadSessionErrorOnTurnStartFailure({
         threadId: event.payload.threadId,
         detail,
