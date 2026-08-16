@@ -1,0 +1,70 @@
+{
+  "_comment": "PROTOTYPE — throwaway. Sketch C: the same workflow authored in-app and persisted in T3 state. The `definition` is byte-for-byte the A1 document; everything around it is what storage forces T3 to invent. See NOTES.md.",
+
+  "id": "wfd_01JCQ8ZK3M2VN7X0R4TB9YH5PA",
+  "version": 3,
+  "versionOf": "wfd_01JCQ8ZK3M2VN7X0R4TB9YH5PA",
+  "immutable": true,
+
+  "scope": {
+    "kind": "project",
+    "projectId": "prj_01JB7WQ2F8K6D3NC5RJ0YT4XSE"
+  },
+
+  "name": "plan-implement-test-review",
+  "createdAt": "2026-08-16T09:14:03.221Z",
+  "createdBy": "usr_01JAA9M4Q7P2WK8V6ZC1HDF3RN",
+
+  "definition": {
+    "version": 1,
+    "inputs": {
+      "task": { "type": "string", "required": true },
+      "testCommand": { "type": "string", "default": "pnpm test" }
+    },
+    "settings": {
+      "turnTimeout": "30m",
+      "maxReviewAttempts": 3
+    },
+    "start": "plan",
+    "nodes": {
+      "plan": {
+        "type": "agent",
+        "prompt": "You are the Plan node of an automated T3 workflow.\n\n## Task\n\n{{ inputs.task }}\n\n## Instructions\n\nWrite a short, concrete implementation plan. Do not modify any files.",
+        "on": { "success": "implement" }
+      },
+      "implement": {
+        "type": "agent",
+        "prompt": "You are the Implement node of an automated T3 workflow.\n\n## Plan\n\n{{ nodes.plan.latest.output }}\n\n## Instructions\n\nApply the plan in this worktree, then summarise what you changed.",
+        "on": { "success": "test" }
+      },
+      "test": {
+        "type": "command",
+        "command": "{{ inputs.testCommand }}",
+        "on": { "success": "review", "commandFailed": "review" }
+      },
+      "review": {
+        "type": "agent",
+        "prompt": "You are the Review node of an automated T3 workflow (attempt {{ run.attempt }}).\n\n## Plan\n\n{{ nodes.plan.latest.output }}\n\n## Implementation report\n\n{{ nodes.implement.latest.output }}\n\n{{#if run.attempt > 1}}## Latest fix report\n\n{{ nodes.fix.latest.output }}\n{{/if}}\n## Latest test run\n\n{{ nodes.test.latest.output }}\n\n## Instructions\n\nDecide whether the work satisfies the task. Explain briefly.\nFinish your reply with a final line containing exactly PASS or FAIL and nothing else.",
+        "verdict": {
+          "reader": "lastStandaloneLine",
+          "cases": { "pass": "PASS", "fail": "FAIL" },
+          "onUnreadable": "failRun"
+        },
+        "on": { "pass": { "end": "passed" }, "fail": "fix" }
+      },
+      "fix": {
+        "type": "agent",
+        "prompt": "You are the Fix node of an automated T3 workflow (attempt {{ run.attempt }}).\n\n## Review feedback\n\n{{ nodes.review.latest.output }}\n\n## Latest test run\n\n{{ nodes.test.latest.output }}\n\n## Instructions\n\nAddress every point in the review feedback and the failing test output.",
+        "on": { "success": "test" }
+      }
+    }
+  },
+
+  "_promptsAreWorseHere": "Escaped into JSON strings, every prompt is now a single unreadable line. The YAML sketch is the same document and is readable; this one is not editable by hand at all, which is the point — a stored definition presumes an editor.",
+
+  "_runsPinAVersion": {
+    "runId": "wfr_01JCQ9B7T4E5S2M8XV3KDN6WQZ",
+    "definitionVersion": 3,
+    "_why": "Without this, editing a workflow mid-run changes the workflow under the run. Git gives the in-repo forms this for free — a run pins a commit."
+  }
+}

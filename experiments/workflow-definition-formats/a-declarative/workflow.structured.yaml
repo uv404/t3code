@@ -1,0 +1,143 @@
+# PROTOTYPE — throwaway. Sketch A2: declarative data, structured control-flow form.
+#
+# The same workflow as `workflow.transitions.yaml`, but the loop is a first-class
+# construct instead of a cycle in a graph. Same data format, opposite bet:
+# A1 makes the graph explicit and the loop implicit; A2 makes the loop explicit
+# and the graph implicit.
+
+version: 1
+name: plan-implement-test-review
+
+inputs:
+  task:
+    type: string
+    required: true
+  testCommand:
+    type: string
+    default: pnpm test
+
+settings:
+  turnTimeout: 30m
+
+steps:
+  - agent: plan
+    prompt: |
+      You are the Plan node of an automated T3 workflow.
+
+      ## Task
+
+      {{ inputs.task }}
+
+      ## Instructions
+
+      Write a short, concrete implementation plan. Do not modify any files.
+
+  - agent: implement
+    prompt: |
+      You are the Implement node of an automated T3 workflow.
+
+      ## Plan
+
+      {{ steps.plan.output }}
+
+      ## Instructions
+
+      Apply the plan in this worktree, then summarise what you changed.
+
+  # The bound now sits on the thing it actually bounds. ⚠ (1) from A1 is fixed:
+  # there is no question which cycle `maxAttempts` applies to, because the cycle
+  # is a named block rather than an emergent property of the edges.
+  - retry:
+      maxAttempts: 3
+      onExhausted:
+        failRun: review-retry-limit
+      steps:
+        - command: test
+          run: "{{ inputs.testCommand }}"
+          # Still three outcomes (⚠ 3 in A1). `continueOn` is how this form
+          # admits that a nonzero exit is a domain result, not an abort — it
+          # reads better than two edges pointing at the same node, but it is
+          # the same fact.
+          continueOn: [commandFailed]
+
+        - agent: review
+          prompt: |
+            You are the Review node of an automated T3 workflow (attempt {{ attempt }}).
+
+            ## Plan
+
+            {{ steps.plan.output }}
+
+            ## Implementation report
+
+            {{ steps.implement.output }}
+
+            # ⚠ Unchanged from A1: the conditional section still needs a
+            # template language. Nothing about structured control flow helps
+            # here — the strain is in *prompt authoring*, not in graph shape,
+            # and it is the single biggest difference between the data formats
+            # and the TypeScript ones.
+            {{#if attempt > 1}}
+            ## Latest fix report
+
+            {{ steps.fix.output }}
+            {{/if}}
+
+            ## Latest test run
+
+            {{ steps.test.output }}
+
+            ## Instructions
+
+            Decide whether the work in this worktree satisfies the task. Explain briefly.
+            Finish your reply with a final line containing exactly PASS or FAIL and nothing else.
+          verdict:
+            reader: lastStandaloneLine
+            cases:
+              pass: PASS
+              fail: FAIL
+          onPass:
+            break: passed
+          onUnreadable:
+            failRun: review-verdict-unreadable
+          # `fail` is implicit: fall through to the next step, then off the end
+          # of the block, which starts the next attempt. Compact — and a reader
+          # has to know that rule to understand the workflow at all.
+
+        - agent: fix
+          prompt: |
+            You are the Fix node of an automated T3 workflow (attempt {{ attempt }}).
+
+            ## Review feedback
+
+            {{ steps.review.output }}
+
+            ## Latest test run
+
+            {{ steps.test.output }}
+
+            ## Instructions
+
+            Address every point in the review feedback and the failing test
+            output, then summarise what you changed.
+
+# ── Where this form strains ───────────────────────────────────────────────────
+#
+# ⚠ (8) Node identity becomes a path, not an id. In A1 the Review node is
+#     `review` and its second run is `review#2` — a stable key that context
+#     entries, a checkpoint ("resume at review, attempt 2"), and a progress UI
+#     can all agree on. Here it is `steps[2].retry.steps[1]`, attempt 2, and
+#     inserting a step above it renames it. Both #13 (durability) and #14
+#     (watching a run) want the stable id.
+#
+# ⚠ (9) You get exactly the shapes the schema anticipated. `retry` exists;
+#     `if`, `while`, `parallel`, `try/catch` do not. Each one a user asks for
+#     is a schema change *plus* an interpreter change *plus* an editor change
+#     — and every one of them already exists, correct and free, in the
+#     TypeScript sketches.
+#
+# ⚠ (10) The static graph is gone. "What nodes will this run execute?" is
+#     answerable only by interpreting the nesting rules — cheap for a machine,
+#     but it means the answer lives in the interpreter rather than the
+#     document, and every consumer (editor, progress UI, diff view) needs that
+#     same interpreter.

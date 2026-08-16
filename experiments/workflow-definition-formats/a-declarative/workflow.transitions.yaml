@@ -1,0 +1,189 @@
+# PROTOTYPE — throwaway. Sketch A1: declarative data, transition-table form.
+#
+# The workflow the spike (6fcca9e63) hardcodes, written as a state machine the
+# user commits to their own repo. Every node names its successor per outcome.
+#
+# Awkward parts are marked ⚠ rather than smoothed over. That is the point of
+# the sketch.
+
+version: 1
+name: plan-implement-test-review
+
+inputs:
+  task:
+    type: string
+    required: true
+  testCommand:
+    type: string
+    default: pnpm test
+
+settings:
+  turnTimeout: 30m
+  # ⚠ (1) This bounds a *cycle* — review --fail--> fix --> test --> review —
+  # but it is written as a global setting because a transition table has no
+  # place to hang a bound on a cycle. With one cycle it is unambiguous by
+  # luck. Add a second cycle and nothing in this document says which one the
+  # bound applies to.
+  maxReviewAttempts: 3
+
+start: plan
+
+nodes:
+  plan:
+    type: agent
+    prompt: |
+      You are the Plan node of an automated T3 workflow.
+
+      ## Task
+
+      {{ inputs.task }}
+
+      ## Worktree
+
+      {{ run.worktreePath }}
+
+      ## Instructions
+
+      Write a short, concrete implementation plan for the task. Do not modify any files.
+    on:
+      success: implement
+      # ⚠ (2) There is no `failure:` edge. A provider timeout, a dead session,
+      # a rejected dispatch — all abort the run, and no node can say otherwise.
+      # Infrastructure failure is an ambient abort, not a branch. Every format
+      # in this prototype made the same implicit choice; none of them stated it.
+
+  implement:
+    type: agent
+    prompt: |
+      You are the Implement node of an automated T3 workflow.
+
+      ## Task
+
+      {{ inputs.task }}
+
+      ## Plan
+
+      {{ nodes.plan.latest.output }}
+
+      ## Instructions
+
+      Apply the plan in this worktree, then summarise what you changed.
+    on:
+      success: test
+
+  test:
+    type: command
+    command: "{{ inputs.testCommand }}"
+    on:
+      # ⚠ (3) Three outcomes, not two. `success` is exit 0; `commandFailed` is
+      # a nonzero exit, which is a *domain* result and deliberately continues
+      # to Review with the failing output in context. A schema offering only
+      # on-success / on-failure silently collapses these, and the collapse is
+      # invisible until a test suite fails in production.
+      success: review
+      commandFailed: review
+      # A spawn error or a command timeout is infrastructure — see ⚠ (2).
+      # It cannot be written here.
+
+  review:
+    type: agent
+    prompt: |
+      You are the Review node of an automated T3 workflow (attempt {{ run.attempt }}).
+
+      ## Task
+
+      {{ inputs.task }}
+
+      ## Plan
+
+      {{ nodes.plan.latest.output }}
+
+      ## Implementation report
+
+      {{ nodes.implement.latest.output }}
+
+      # ⚠ (4) The section below must appear only from attempt 2 onward — on
+      # attempt 1 there is no Fix output to quote, and `{{ nodes.fix.latest }}`
+      # does not exist. Handling that requires conditionals *inside* the
+      # template, so the format now carries a second mini-language whose
+      # semantics (truthiness, missing keys, whitespace) have to be specified
+      # and documented. The TypeScript sketches replace this whole section
+      # with a ternary.
+      {{#if run.attempt > 1}}
+      ## Latest fix report
+
+      {{ nodes.fix.latest.output }}
+      {{/if}}
+
+      ## Latest test run
+
+      {{ nodes.test.latest.output }}
+
+      ## Instructions
+
+      Decide whether the work in this worktree satisfies the task. Explain briefly.
+      Finish your reply with a final line containing exactly PASS or FAIL and nothing else.
+
+    # ⚠ (5) The load-bearing part of the whole workflow: turning an LLM's prose
+    # into a branch. The spike found a task phrased with an escape hatch
+    # producing a *legitimate* PASS on a failing suite — so this is a product
+    # question, not a syntax one. Two bad options, both shown:
+    #
+    #   (a) built-in named readers  → users get only the verdicts T3 ships
+    #   (b) user-supplied patterns  → users can write a wrong one, and find out
+    #                                 three paid agent turns into a run
+    verdict:
+      reader: lastStandaloneLine
+      cases:
+        pass: PASS
+        fail: FAIL
+      # ⚠ (6) The third outcome. Easy to leave out of a schema, and it is
+      # exactly where the interesting bugs live: an unreadable verdict must not
+      # silently become FAIL, or a provider that ignored the instruction gets
+      # to pick the branch by accident.
+      onUnreadable: failRun
+
+    on:
+      pass:
+        end: passed
+      # ⚠ (7) This edge is a lie by omission. `fail` goes to Fix *only while
+      # attempts remain*; on the last attempt it ends the run as failed. That
+      # condition lives in `settings.maxReviewAttempts`, three screens away,
+      # and nothing connects the two. A reader of this node cannot see the
+      # workflow's real behaviour.
+      fail: fix
+
+  fix:
+    type: agent
+    prompt: |
+      You are the Fix node of an automated T3 workflow (attempt {{ run.attempt }}).
+
+      ## Task
+
+      {{ inputs.task }}
+
+      ## Plan
+
+      {{ nodes.plan.latest.output }}
+
+      ## Implementation report
+
+      {{ nodes.implement.latest.output }}
+
+      ## Review feedback
+
+      {{ nodes.review.latest.output }}
+
+      ## Latest test run
+
+      {{ nodes.test.latest.output }}
+
+      ## Instructions
+
+      Address every point in the review feedback and the failing test output,
+      then summarise what you changed.
+    on:
+      # The back-edge. The loop exists only as a cycle in the graph — no
+      # construct in this document names it, which is what makes ⚠ (1) and
+      # ⚠ (7) unfixable without leaving the transition-table form.
+      success: test
