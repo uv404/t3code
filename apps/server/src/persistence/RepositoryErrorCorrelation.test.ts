@@ -224,6 +224,7 @@ describe("persistence error correlation", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt,
+        nativeSessionId: null,
         resumeCursor: null,
         runtimePayload: null,
       });
@@ -244,6 +245,7 @@ describe("persistence error correlation", () => {
           runtimeMode: "full-access",
           status: "running",
           lastSeenAt,
+          nativeSessionId: null,
           resumeCursor: null,
           runtimePayload: { secret: runtimePayload },
         }),

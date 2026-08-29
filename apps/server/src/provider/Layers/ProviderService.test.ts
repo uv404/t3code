@@ -14,7 +14,9 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  defaultInstanceIdForDriver,
   EventId,
+  NativeSessionId,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionStartInput,
@@ -218,6 +220,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      nativeSessionDiscovery: "unsupported",
     },
     startSession,
     sendTurn,
@@ -2292,5 +2295,159 @@ describe("agent browser access", () => {
 
       assert.deepEqual(issued, [threadId]);
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("ProviderServiceLive.discoverNativeSessions", () => {
+  const nativeSession = (provider: ProviderDriverKind, nativeId: string, lastActiveAt: string) => ({
+    provider,
+    nativeId: NativeSessionId.make(nativeId),
+    source: "cli" as const,
+    activity: "notLoaded" as const,
+    lastActiveAt,
+    resumeCursor: { threadId: nativeId },
+  });
+
+  /** Adapter that reports native sessions, gated on the capability flag. */
+  const withDiscovery = (
+    provider: ProviderDriverKind,
+    discover: NonNullable<ProviderAdapterShape<ProviderAdapterError>["discoverNativeSessions"]>,
+  ): ProviderAdapterShape<ProviderAdapterError> => ({
+    ...makeFakeCodexAdapter(provider).adapter,
+    capabilities: { sessionModelSwitch: "in-session", nativeSessionDiscovery: "supported" },
+    discoverNativeSessions: discover,
+  });
+
+  const runDiscovery = (
+    adapters: Record<string, ProviderAdapterShape<ProviderAdapterError>>,
+    input: Parameters<ProviderService.ProviderService["Service"]["discoverNativeSessions"]>[0],
+  ) =>
+    Effect.gen(function* () {
+      const service = yield* ProviderService.ProviderService;
+      return yield* service.discoverNativeSessions(input);
+    }).pipe(
+      Effect.provide(
+        makeProviderServiceLive().pipe(
+          Layer.provide(
+            Layer.succeed(
+              ProviderAdapterRegistry.ProviderAdapterRegistry,
+              makeAdapterRegistryMock(adapters),
+            ),
+          ),
+          Layer.provide(
+            ProviderSessionDirectoryLive.pipe(
+              Layer.provide(
+                ProviderSessionRuntime.layer.pipe(Layer.provide(SqlitePersistenceMemory)),
+              ),
+            ),
+          ),
+          Layer.provide(defaultServerSettingsLayer),
+          Layer.provide(serverConfigTestLayer),
+          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(
+            Layer.succeed(
+              ProviderEventLoggers.ProviderEventLoggers,
+              ProviderEventLoggers.NoOpProviderEventLoggers,
+            ),
+          ),
+        ),
+      ),
+      Effect.provide(NodeServices.layer),
+    );
+
+  it.effect("names adapters that cannot be searched instead of dropping them", () =>
+    Effect.gen(function* () {
+      const result = yield* runDiscovery(
+        {
+          [CODEX_DRIVER]: withDiscovery(CODEX_DRIVER, () =>
+            Effect.succeed({ sessions: [nativeSession(CODEX_DRIVER, "t-1", "2026-01-02")] }),
+          ),
+          // Declares "unsupported" — must be reported, not silently omitted.
+          [CURSOR_DRIVER]: makeFakeCodexAdapter(CURSOR_DRIVER).adapter,
+        },
+        {},
+      );
+
+      assert.deepStrictEqual(
+        result.sessions.map((session) => String(session.nativeId)),
+        ["t-1"],
+      );
+      assert.deepStrictEqual(result.unsupportedProviders, [CURSOR_DRIVER]);
+    }),
+  );
+
+  it.effect("keeps other providers' sessions when one adapter fails", () =>
+    Effect.gen(function* () {
+      const result = yield* runDiscovery(
+        {
+          [CODEX_DRIVER]: withDiscovery(CODEX_DRIVER, () =>
+            Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: String(CODEX_DRIVER),
+                method: "thread/list",
+                detail: "app-server unavailable",
+              }),
+            ),
+          ),
+          [CLAUDE_AGENT_DRIVER]: withDiscovery(CLAUDE_AGENT_DRIVER, () =>
+            Effect.succeed({ sessions: [nativeSession(CLAUDE_AGENT_DRIVER, "c-1", "2026-01-01")] }),
+          ),
+        },
+        {},
+      );
+
+      assert.deepStrictEqual(
+        result.sessions.map((session) => String(session.nativeId)),
+        ["c-1"],
+      );
+    }),
+  );
+
+  it.effect("orders a fan-out newest first across providers", () =>
+    Effect.gen(function* () {
+      const result = yield* runDiscovery(
+        {
+          [CODEX_DRIVER]: withDiscovery(CODEX_DRIVER, () =>
+            Effect.succeed({ sessions: [nativeSession(CODEX_DRIVER, "older", "2026-01-01")] }),
+          ),
+          [CLAUDE_AGENT_DRIVER]: withDiscovery(CLAUDE_AGENT_DRIVER, () =>
+            Effect.succeed({
+              sessions: [nativeSession(CLAUDE_AGENT_DRIVER, "newer", "2026-02-01")],
+            }),
+          ),
+        },
+        {},
+      );
+
+      assert.deepStrictEqual(
+        result.sessions.map((session) => String(session.nativeId)),
+        ["newer", "older"],
+      );
+    }),
+  );
+
+  it.effect("suppresses the cursor on a fan-out but keeps it for one instance", () =>
+    Effect.gen(function* () {
+      const adapters = {
+        [CODEX_DRIVER]: withDiscovery(CODEX_DRIVER, () =>
+          Effect.succeed({
+            sessions: [nativeSession(CODEX_DRIVER, "t-1", "2026-01-02")],
+            nextCursor: "page-2",
+          }),
+        ),
+        [CLAUDE_AGENT_DRIVER]: withDiscovery(CLAUDE_AGENT_DRIVER, () =>
+          Effect.succeed({ sessions: [], nextCursor: "other-page" }),
+        ),
+      };
+
+      // Cursors are adapter-minted and not comparable across providers.
+      const fannedOut = yield* runDiscovery(adapters, {});
+      assert.strictEqual(fannedOut.nextCursor, undefined);
+
+      const targeted = yield* runDiscovery(adapters, {
+        providerInstanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
+      });
+      assert.strictEqual(targeted.nextCursor, "page-2");
+    }),
   );
 });

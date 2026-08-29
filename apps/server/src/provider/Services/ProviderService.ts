@@ -12,6 +12,10 @@
  * @module ProviderService
  */
 import type {
+  DiscoverNativeSessionsInput,
+  NativeSessionDiscoveryPage,
+  NativeSessionHistory,
+  NativeSessionId,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
@@ -94,6 +98,26 @@ export interface ProviderServiceShape {
   readonly getCapabilities: (
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ProviderAdapterCapabilities, ProviderServiceError>;
+
+  /**
+   * Discover sessions provider harnesses created outside T3.
+   *
+   * Targets one instance when `input.providerInstanceId` is set, otherwise fans
+   * out across every live instance whose adapter supports discovery. Adapters
+   * that do not are named in `unsupportedProviders` rather than dropped, so an
+   * empty list can be told apart from an unsearchable provider.
+   *
+   * A failing adapter does not fail the whole call: discovery is a browse
+   * operation, and one broken harness must not hide the others' sessions.
+   */
+  readonly discoverNativeSessions: (
+    input: DiscoverNativeSessionsInput,
+  ) => Effect.Effect<NativeSessionDiscoveryPage, ProviderServiceError>;
+
+  readonly readNativeSession?: (input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly nativeSessionId: NativeSessionId;
+  }) => Effect.Effect<NativeSessionHistory, ProviderServiceError>;
 
   readonly getInstanceInfo: (
     instanceId: ProviderInstanceId,

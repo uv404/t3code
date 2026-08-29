@@ -169,7 +169,12 @@ describe("ProviderSessionReaper", () => {
       respondToUserInput: () => unsupported(),
       stopSession,
       listSessions: () => Effect.succeed([]),
-      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      getCapabilities: () =>
+        Effect.succeed({
+          sessionModelSwitch: "in-session" as const,
+          nativeSessionDiscovery: "unsupported" as const,
+        }),
+      discoverNativeSessions: () => Effect.succeed({ sessions: [], unsupportedProviders: [] }),
       getInstanceInfo: (instanceId) => {
         const driverKind = ProviderDriverKind.make(String(instanceId));
         return Effect.succeed({
@@ -265,6 +270,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-stale",
         },
@@ -313,6 +319,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-active-turn",
         },
@@ -361,6 +368,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-background-work",
         },
@@ -408,6 +416,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: now,
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-fresh",
         },
@@ -455,6 +464,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "stopped",
         lastSeenAt: "2026-04-14T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-stopped",
         },
@@ -524,6 +534,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-failure",
         },
@@ -539,6 +550,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:01:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-success",
         },
@@ -605,6 +617,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:00:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-defect",
         },
@@ -620,6 +633,7 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         lastSeenAt: "2026-04-14T00:01:00.000Z",
+        nativeSessionId: null,
         resumeCursor: {
           opaque: "resume-after-defect",
         },

@@ -65,6 +65,10 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import {
+  discoverCodexNativeSessions,
+  readCodexNativeSessionHistory,
+} from "./CodexNativeSessionDiscovery.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -1992,6 +1996,62 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
     Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
 
+  const discoverNativeSessions: NonNullable<CodexAdapterShape["discoverNativeSessions"]> = (
+    input,
+  ) =>
+    discoverCodexNativeSessions(
+      {
+        provider: PROVIDER,
+        ...(boundInstanceId ? { providerInstanceId: boundInstanceId } : {}),
+        binaryPath: codexConfig.binaryPath,
+        ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+        ...(codexConfig.launchArgs ? { launchArgs: codexConfig.launchArgs } : {}),
+        ...(options?.environment ? { environment: options.environment } : {}),
+        // The probe process only needs a valid directory to start in; result
+        // scoping comes from `input.cwd`, which filters server-side.
+        spawnCwd: input.cwd ?? process.cwd(),
+      },
+      input,
+    ).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "thread/list",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+
+  const readNativeSession: NonNullable<CodexAdapterShape["readNativeSession"]> = (
+    nativeSessionId,
+  ) =>
+    readCodexNativeSessionHistory(
+      {
+        provider: PROVIDER,
+        ...(boundInstanceId ? { providerInstanceId: boundInstanceId } : {}),
+        binaryPath: codexConfig.binaryPath,
+        ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+        ...(codexConfig.launchArgs ? { launchArgs: codexConfig.launchArgs } : {}),
+        ...(options?.environment ? { environment: options.environment } : {}),
+        spawnCwd: process.cwd(),
+      },
+      nativeSessionId,
+    ).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+      Effect.mapError(
+        (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "thread/read",
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
+
   const stopAll: CodexAdapterShape["stopAll"] = () =>
     Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
       concurrency: 1,
@@ -2010,6 +2070,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      nativeSessionDiscovery: "supported",
     },
     startSession,
     sendTurn,
@@ -2022,6 +2083,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
+    discoverNativeSessions,
+    readNativeSession,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

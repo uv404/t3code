@@ -1175,7 +1175,9 @@ export function makeCursorAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      // See GrokAdapter: ACP `session/list` exists in the protocol but is not
+      // confirmed implemented by the cursor-agent binary.
+      capabilities: { sessionModelSwitch: "in-session", nativeSessionDiscovery: "unsupported" },
       startSession,
       sendTurn,
       interruptTurn,

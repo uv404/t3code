@@ -84,6 +84,7 @@ import {
   cleanupFailedUploadedAttachments,
   normalizeDispatchCommand,
 } from "./orchestration/Normalizer.ts";
+import * as NativeSessionImport from "./orchestration/Services/NativeSessionImport.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
@@ -491,6 +492,7 @@ const makeWsRpcLayer = (
             return Effect.void;
         }
       };
+      const nativeSessionImport = yield* NativeSessionImport.NativeSessionImport;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const keybindings = yield* Keybindings.Keybindings;
       const environmentTheme = yield* EnvironmentTheme.EnvironmentThemeService;
@@ -2518,6 +2520,20 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.nativeSessionsDiscover]: (input) =>
+          observeRpcEffect(WS_METHODS.nativeSessionsDiscover, nativeSessionImport.discover(input), {
+            "rpc.aggregate": "nativeSessions",
+          }),
+        [WS_METHODS.nativeSessionsImport]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.nativeSessionsImport,
+            nativeSessionImport.importSession(input),
+            { "rpc.aggregate": "nativeSessions" },
+          ),
+        [WS_METHODS.nativeSessionsHistory]: (input) =>
+          observeRpcEffect(WS_METHODS.nativeSessionsHistory, nativeSessionImport.history(input), {
+            "rpc.aggregate": "nativeSessions",
+          }),
       });
     }),
   );

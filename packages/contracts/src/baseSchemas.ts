@@ -129,3 +129,12 @@ export const ApprovalRequestId = makeEntityId("ApprovalRequestId");
 export type ApprovalRequestId = typeof ApprovalRequestId.Type;
 export const CheckpointRef = makeEntityId("CheckpointRef");
 export type CheckpointRef = typeof CheckpointRef.Type;
+
+/**
+ * Identifier a provider's own CLI/harness assigns to a session it created
+ * outside T3. Deliberately distinct from `ThreadId`: a `ThreadId` names a T3
+ * orchestration thread, while this names a session T3 does not own and whose
+ * format is the harness's business (Codex thread uuid, Claude session uuid).
+ */
+export const NativeSessionId = makeEntityId("NativeSessionId");
+export type NativeSessionId = typeof NativeSessionId.Type;

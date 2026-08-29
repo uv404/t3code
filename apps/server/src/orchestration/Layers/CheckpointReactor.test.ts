@@ -112,7 +112,12 @@ function createProviderServiceHarness(
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
     listSessions,
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+    getCapabilities: () =>
+      Effect.succeed({
+        sessionModelSwitch: "in-session" as const,
+        nativeSessionDiscovery: "unsupported" as const,
+      }),
+    discoverNativeSessions: () => Effect.succeed({ sessions: [], unsupportedProviders: [] }),
     getInstanceInfo: (instanceId) =>
       Effect.succeed({
         instanceId,
