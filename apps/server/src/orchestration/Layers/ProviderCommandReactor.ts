@@ -1259,7 +1259,7 @@ const make = Effect.gen(function* () {
         return Effect.interrupt;
       }
 
-      const detail = formatFailureDetail(cause);
+      const detail = formatProviderFailureDetail(cause);
       return Effect.gen(function* () {
         const latestThread = yield* resolveThread(event.payload.threadId);
         const latestSession = latestThread?.session;

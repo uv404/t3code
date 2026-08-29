@@ -399,9 +399,14 @@ export function NativeSessionImportDialog() {
                                     faviconPath={project.faviconPath}
                                     className="size-3.5 shrink-0"
                                   />
-                                  <span className="truncate" title={project.workspaceRoot}>
-                                    {project.title}
-                                  </span>
+                                  <Tooltip>
+                                    <TooltipTrigger render={<span className="truncate" />}>
+                                      {project.title}
+                                    </TooltipTrigger>
+                                    <TooltipPopup side="right">
+                                      {project.workspaceRoot}
+                                    </TooltipPopup>
+                                  </Tooltip>
                                 </span>
                               </MenuRadioItem>
                             ))}
